@@ -1,7 +1,7 @@
 import csv
 import os
 
-class Investar:
+class InvestKorea:
     def calculate(self, code, name, price, growth_rate, df):
         """
         적정주가 = 정상EPS * (정상PER + 적정화계분수 * 2)
