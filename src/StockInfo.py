@@ -73,8 +73,7 @@ class StockInfo():
         ###재무제표 요청 url 생성
         endpoint = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json?"
         # API 키
-        # crtfc_key = "ef4b80169c391e3a477cd3bc97ac8b1b039bec15"
-        crtfc_key = "17d86e86b2f54d2e5ef9d33c37560a2100e06913"
+        crtfc_key = ""
         # 기업 이름
         corp_code = str(self.find_corp_num(code))
         # 사업 연도
