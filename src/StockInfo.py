@@ -1,9 +1,89 @@
+import pandas as pd
+import requests
+import xml.etree.ElementTree as et
+from io import BytesIO
+from zipfile import ZipFile
+
+from bs4 import BeautifulSoup
+from urllib.request import urlopen
+
 import urllib
 import bs4
-import requests
-from datetime import datetime
+
+from datetime import date
 
 class StockInfo():
+    def __init__(self) -> None:
+        """
+        # DataFrame 검색
+        df[(df['corp_name'] == '삼성전자')].iloc[0].corp_code
+        """
+        crtfc_key = ""
+        # OpenDART에서 Zipfile 받아와 객체에 저장하기
+        u = requests.get('https://opendart.fss.or.kr/api/corpCode.xml', params={'crtfc_key':crtfc_key})
+        zipfile_bytes = u.content
+        zipfile_obj = ZipFile(BytesIO(zipfile_bytes))
+
+        # 압축을 풀어서 XML File을 string으로 담기
+        xmlfile_objs = {name: zipfile_obj.read(name) for name in zipfile_obj.namelist()}
+        xml_str = xmlfile_objs['CORPCODE.xml'].decode('utf-8')
+
+        # XML String을 가져와서 DataFrame에 담기
+        xroot = et.fromstring(xml_str)
+
+        df_cols = ["corp_code", "corp_name", "stock_code", "modify_date"]
+        rows = []
+
+        for node in xroot: 
+            res = []
+            for el in df_cols[0:]: 
+                if node is not None and node.find(el) is not None:
+                    res.append(node.find(el).text)
+                else: 
+                    res.append(None)
+            rows.append({df_cols[i]: res[i] 
+                        for i, _ in enumerate(df_cols)})
+
+        self.df = pd.DataFrame(rows, columns=df_cols)
+
+    def get_corp_num(self, code):
+        return self.df[(self.df['stock_code'] == code)].iloc[0].corp_code
+    
+    def get_price(self, code, pages_to_fetch = 1):
+        """네이버에서 주식 시세를 읽어서 데이터프레임으로 반환"""
+        try:
+            baseURL = "https://fchart.stock.naver.com/sise.nhn?"
+            symbol = str(code)
+            timeframe = "day"
+            count = str(pages_to_fetch)
+            requestType = "0"
+            url = baseURL + "symbol=" + symbol + "&" + "timeframe=" + timeframe + "&" + "count=" + count + "&" + "requestType=" + requestType
+            bf_price = 0
+
+            df = []
+            with urlopen(url) as doc:
+                if doc is None:
+                    return None
+                html = BeautifulSoup(doc, "lxml")
+                items = html.findAll('item')
+                for item in items:
+                    data = item.get('data').split('|')
+                    data.insert(5, 0)
+                    if bf_price == 0:
+                        bf_price = int(data[4])
+                        data[5] = 0
+                    else:
+                        diff = int(data[4]) - bf_price
+                        bf_price = int(data[4])
+                        data[5] = str(diff)
+                    date = data[0][:4] + "-" + data[0][4:6] + "-" + data[0][6:8]
+                    data[0] = date
+                    df.append(data)
+        except Exception as e:
+            print('Exception occured :', str(e))
+            return None
+        return df[0][4]
+
     def get_outstanding(self, code):
         ###발행주식수 찾기
         endpoint = "https://finance.naver.com/item/coinfo.nhn?"
@@ -61,8 +141,9 @@ class StockInfo():
 
     def get_ready_to_trade_shares(self, code):
         ###유통주식수 찾기
-        try: return (float(self.find_total_stocks(code)) - float(self.find_comp_stocks(code)))
+        try: return (float(self.get_outstanding(code)) - float(self.get_treasury(code)))
         except: return 1
+    
 
     def get_book_info(self, code, name):
         """
@@ -70,19 +151,21 @@ class StockInfo():
         Cur_Asset, Bef_Asset, Cur_Debt, Bef_Debt, Profit, Oth_Profit, Oth_Loss, Tax
         = (당기 총자산, 전기 총자산, 당기 총부채, 전기 총부채, 영업이익, 영업외수익, 영업외비용, 법인세비용)
         """
-        ###재무제표 요청 url 생성
         endpoint = "https://opendart.fss.or.kr/api/fnlttSinglAcntAll.json?"
-        # API 키
         crtfc_key = ""
-        # 기업 이름
-        corp_code = str(self.find_corp_num(code))
+        corp_code = self.get_corp_num(code)
+
+        today = str(date.today())
+        dates = today.split("-")
         # 사업 연도
-        bsns_year = "2020"
-        # 보고서 코드:
-        # 1분기보고서: 11013
-        # 반기보고서: 11012
-        # 3분기보고서: 11014
-        reprt_code = "11014"
+        bsns_year = dates[0]
+        """
+        5월 15일 ~ 8월 13일: 11013
+        8월 14일 ~ 11월 13일: 11012
+        11월 14일 ~ 5월 14일: 11014
+        """
+        reprt_code = "11012"
+        
         # OFS: 재무제표
         fs_div = "OFS"
         paramset = "crtfc_key=" + crtfc_key + "&" + "corp_code=" + corp_code + "&" + "bsns_year=" + bsns_year + "&" + "reprt_code=" + reprt_code + "&" + "fs_div=" + fs_div
@@ -302,3 +385,4 @@ class StockInfo():
                         Tax = 0
 
         return Cur_Asset, Bef_Asset, Cur_Debt, Bef_Debt, Profit, Oth_Profit, Oth_Loss, Tax
+    
